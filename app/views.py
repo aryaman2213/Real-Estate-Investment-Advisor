@@ -40,11 +40,13 @@ DEFAULT_PROPERTY = {
 
 
 def advisor():
+    m = data.metrics()
     ui.hero(
         "Investment advisor",
         "Is this property a good investment?",
         "Enter a property's details. One model classifies it as a Good Investment or not; a second forecasts its "
-        "price in five years. Both were trained on 200,000 listings and tested on 50,000 they never saw.",
+        f"price in five years. Both were trained on {m['train_rows']:,} listings, tuned on {m['val_rows']:,} and "
+        f"tested on {m['test_rows']:,} they never saw.",
         pills=["Classification: Good Investment", "Regression: price in 5 years", "Confidence + explanation"],
     )
     df = data.listings()
@@ -63,16 +65,17 @@ def advisor():
         ptype = a.selectbox("Property type", ["Apartment", "Independent House", "Villa"],
                             index=["Apartment", "Independent House", "Villa"].index(d["Property_Type"]))
         bhk = b.selectbox("BHK", [1, 2, 3, 4, 5], index=d["BHK"] - 1)
-        size = c.number_input("Size (sq ft)", 300, 10000, d["Size_in_SqFt"], step=50)
-        price = e.number_input("Asking price (lakhs)", 5.0, 2000.0, float(d["Price_in_Lakhs"]), step=5.0,
-                               help="1 crore = 100 lakhs")
+        size = c.number_input("Size (sq ft)", 500, 5000, d["Size_in_SqFt"], step=50,
+                              help="500-5,000 sq ft: the range the models were trained on")
+        price = e.number_input("Asking price (lakhs)", 10.0, 500.0, float(d["Price_in_Lakhs"]), step=5.0,
+                               help="₹10 L to ₹5 Cr (1 crore = 100 lakhs): the range the models were trained on")
 
         a, b, c, e = st.columns(4)
-        year = a.number_input("Year built", 1950, config.REFERENCE_YEAR, d["Year_Built"])
+        year = a.number_input("Year built", 1990, 2023, d["Year_Built"], help="1990-2023: the range in the training data")
         availability = b.selectbox("Availability", ["Ready to Move", "Under Construction"],
                                    index=["Ready to Move", "Under Construction"].index(d["Availability_Status"]))
-        floor = c.number_input("Floor number", 0, 100, d["Floor_No"])
-        total_floors = e.number_input("Total floors in building", 1, 100, d["Total_Floors"])
+        floor = c.number_input("Floor number", 0, 30, d["Floor_No"], help="0 = ground floor")
+        total_floors = e.number_input("Total floors in building", 1, 30, d["Total_Floors"])
 
         a, b, c, e = st.columns(4)
         schools = a.slider("Nearby schools", 1, 10, d["Nearby_Schools"])
@@ -104,7 +107,11 @@ def advisor():
                      icon=":material/error:")
             return
         st.session_state["advisor_input"] = form
-    _advisor_result(st.session_state.get("advisor_input", DEFAULT_PROPERTY), df)
+    analysed = st.session_state.get("advisor_input", DEFAULT_PROPERTY)
+    if form != analysed and not submitted:
+        st.info("The inputs above have changed. Press **Analyse this property** to update the result below.",
+                icon=":material/refresh:")
+    _advisor_result(analysed, df)
 
 
 def _advisor_result(form, df):
@@ -115,18 +122,25 @@ def _advisor_result(form, df):
     median_ppsf = data.market_reference()["city_median_ppsf"][form["City"]]
 
     st.markdown("### Result")
-    confidence = max(p.probability, 1 - p.probability)
-    strength = "High" if confidence >= 0.85 else "Moderate" if confidence >= 0.65 else "Low"
+    st.caption(f"For: {form['BHK']} BHK {form['Property_Type'].lower()}, {form['Size_in_SqFt']:,} sq ft in "
+               f"{form['City']}, {form['State']} at {ui.lakhs(price)}, built {form['Year_Built']}, "
+               f"{form['Availability_Status'].lower()}.")
+    # Confidence = probability of the predicted class; strength = how far the score sits from the decision line.
+    confidence = p.probability if p.is_good else 1 - p.probability
+    margin = abs(p.probability - p.threshold)
+    strength = "high" if margin >= 0.25 else "moderate" if margin >= 0.1 else "low (borderline)"
     kind, icon = ("good", "✅") if p.is_good else ("bad", "⚠️")
     title = "Good Investment" if p.is_good else "Not a good investment"
     color = ui.GOOD if p.is_good else ui.BAD
     st.markdown(
         f'<div class="verdict {kind}"><div class="icon">{icon}</div><div>'
-        f'<div class="label">Classification model · {strength.lower()} confidence</div>'
+        f'<div class="label">Classification model · {strength} confidence</div>'
         f'<div class="title">{title}</div>'
         f'<div class="sub">The model gives this property a <b>{ui.probability(p.probability)}</b> probability of being a Good '
-        f'Investment (threshold 50%). Confidence in this verdict: <b>{ui.probability(confidence)}</b>.</div>'
-        f'<div class="bar"><div style="width:{p.probability * 100:.1f}%; background:{color}"></div></div>'
+        f'Investment. It says "good" above <b>{p.threshold:.0%}</b> (the cut-off that maximised F1 on validation data). '
+        f'Confidence in this verdict: <b>{ui.probability(confidence)}</b>.</div>'
+        f'<div class="bar"><div style="width:{p.probability * 100:.1f}%; background:{color}"></div>'
+        f'<span class="mark" style="left:{p.threshold * 100:.1f}%"></span></div>'
         f'</div></div>', unsafe_allow_html=True)
     st.write("")
 
@@ -135,7 +149,8 @@ def _advisor_result(form, df):
         ("Asking price", ui.lakhs(price), f"{ui.inr(price * config.LAKH / form['Size_in_SqFt'])} per sq ft"),
         ("Estimated price in 5 years", ui.lakhs(p.future_price), "Regression model forecast", f"{gain:+.1f}% total"),
         ("90% forecast range", f"{ui.lakhs(p.future_low)} – {ui.lakhs(p.future_high)}",
-         "90% of test-set properties landed inside this band around the forecast"),
+         f"Calibrated on validation data; it contains the true value for "
+         f"{100 * data.metrics()['regression']['interval_90_test_coverage']:.1f}% of unseen test listings"),
         ("Implied annual growth", ui.pct(p.implied_growth_pct, 2), f"Benchmark: {BENCHMARK:.0f}% a year",
          f"{p.implied_growth_pct - BENCHMARK:+.2f} pp vs {BENCHMARK:.0f}%"),
     ])
@@ -161,7 +176,7 @@ def _advisor_result(form, df):
                 x=top.values, y=[ui.label(i) for i in top.index], orientation="h",
                 marker_color=[ui.GOOD if v > 0 else ui.BAD for v in top.values],
                 hovertemplate="%{y}: %{x:+.2f} log-odds<extra></extra>"))
-            fig.update_layout(xaxis_title="← pushes towards 'not good'   ·   pushes towards 'good' →")
+            fig.update_layout(xaxis_title="← towards 'not good'  ·  towards 'good' →")
             ui.chart_card(fig, "Why the model decided this",
                           "Each bar is how much one feature moved this property's score (SHAP values from XGBoost).", 340)
     with right:
@@ -183,7 +198,7 @@ def _advisor_result(form, df):
                               annotation_position="top")
                 fig.update_layout(xaxis_title="Price (lakhs)", yaxis_title="Listings", height=210, margin=dict(l=4, r=8, t=24, b=4),
                                   paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
-                st.plotly_chart(fig, width="stretch", theme=None, config={"displaylogo": False})
+                st.plotly_chart(fig, width="stretch", theme=None, config=ui.PLOTLY_CONFIG)
 
 
 # =============================================================================================
@@ -209,7 +224,7 @@ def explorer():
         ("Listings", f"{len(df):,}", "Matching the sidebar filters and search"),
         ("Median price", ui.lakhs(df["Price_in_Lakhs"].median()), "Median asking price"),
         ("Median price / sq ft", ui.inr(df["Price_per_SqFt"].median()), "Median rupees per square foot"),
-        ("Good Investments", ui.pct(100 * df["Good_Investment"].mean()), "Share labelled Good Investment"),
+        ("Good Investments", ui.pct(100 * df["Good_Investment"].mean()), "Share labelled Good Investment (rule label)"),
         ("Avg forecast 5-yr gain", ui.pct(df["Predicted_Gain_Pct"].mean()), "Regression model, average over these listings"),
     ])
     st.write("")
@@ -220,10 +235,12 @@ def explorer():
     view = df.sort_values(by, ascending=asc).head(limit)
     table = view[["City", "Locality", "Property_Type", "BHK", "Size_in_SqFt", "Price_in_Lakhs", "Price_per_SqFt",
                   "Availability_Status", "Public_Transport_Accessibility", "Model_Probability", "Predicted_Price_5Y",
-                  "Predicted_Gain_Pct", "Good_Investment"]].copy()
+                  "Predicted_Gain_Pct", "Model_Verdict", "Good_Investment"]].copy()
     table["Model_Probability"] *= 100
+    table["Model_Verdict"] = table["Model_Verdict"].map({1: "✅ Good", 0: "—"})
     table["Good_Investment"] = table["Good_Investment"].map({1: "✅ Good", 0: "—"})
-    st.caption(f"Showing {len(view):,} of {len(df):,} matching listings. Click a column header to re-sort.")
+    st.caption(f"Showing {len(view):,} of {len(df):,} matching listings. Click a column header to re-sort. "
+               "'Model verdict' is the classifier's prediction; 'Rule label' is the target it was trained to predict.")
     st.dataframe(
         table, hide_index=True, width="stretch", height=520,
         column_config={
@@ -235,7 +252,9 @@ def explorer():
                                                                  min_value=0, max_value=100),
             "Predicted_Price_5Y": st.column_config.NumberColumn("Forecast in 5 yrs (L)", format="%.1f"),
             "Predicted_Gain_Pct": st.column_config.NumberColumn("Forecast gain", format="%.1f%%"),
-            "Good_Investment": "Label",
+            "Model_Verdict": st.column_config.TextColumn("Model verdict", help="Probability above the decision threshold"),
+            "Good_Investment": st.column_config.TextColumn("Rule label", help="The target: >= 8% growth and price per sq ft "
+                                                                            "at or below the city median"),
         })
     st.download_button("Download these rows (CSV)", view.to_csv(index=False).encode(), "filtered_properties.csv",
                        "text/csv", icon=":material/download:")
@@ -284,7 +303,8 @@ def locations():
         fig = px.bar(ranked, x=col, y="City", color="Tier_Label", orientation="h", color_discrete_map=ui.TIER_COLORS,
                      labels={col: metric, "City": ""})
         lo, hi = ranked[col].min(), ranked[col].max()
-        fig.update_xaxes(range=[lo - (hi - lo) * 0.6, hi + (hi - lo) * 0.1])
+        span = (hi - lo) or max(abs(hi) * 0.1, 1)  # a single city has no spread
+        fig.update_xaxes(range=[max(lo - span * 0.6, 0), hi + span * 0.1])
         ui.chart_card(fig, "Top 15 cities", f"Ranked by {metric.lower()} (axis zoomed to show differences).", 560)
 
     heat = df.pivot_table(index="State", columns="Property_Type", values="Good_Investment", aggfunc="mean") * 100
@@ -297,12 +317,15 @@ def locations():
         choices = sorted(df["City"].unique())
         default = [c for c in ["Mumbai", "Nagpur", "Patna", "Bangalore"] if c in choices][:4] or choices[:3]
         picked = st.multiselect("Cities to compare", choices, default=default, key="trend_cities")
-        trend = (df[df["City"].isin(picked)].groupby(["Year_Built", "City"])["Price_per_SqFt"].median()
-                 .groupby(level="City").transform(lambda s: s.rolling(5, min_periods=1).mean()).reset_index())
-        fig = px.line(trend, x="Year_Built", y="Price_per_SqFt", color="City",
-                      labels={"Year_Built": "Year built", "Price_per_SqFt": "Median ₹ / sq ft"})
-        ui.chart_card(fig, "Price trend by construction year",
-                      "No sale dates exist, so year built is the time axis (5-year rolling median).", 520)
+        if not picked:
+            st.info("Pick at least one city to draw the trend.", icon=":material/show_chart:")
+        else:
+            trend = (df[df["City"].isin(picked)].groupby(["Year_Built", "City"])["Price_per_SqFt"].median()
+                     .groupby(level="City").transform(lambda s: s.rolling(5, min_periods=1).mean()).reset_index())
+            fig = px.line(trend, x="Year_Built", y="Price_per_SqFt", color="City",
+                          labels={"Year_Built": "Year built", "Price_per_SqFt": "Median ₹ / sq ft"})
+            ui.chart_card(fig, "Price trend by construction year",
+                          "No sale dates exist, so year built is the time axis (5-year rolling median).", 520)
 
 
 # =============================================================================================
@@ -381,7 +404,7 @@ def _metric_table(models: dict, champion: str, keys: list[str], labels: list[str
     rows = []
     for name, m in models.items():
         row = {"Model": ("🏆 " if name == champion else "") + name}
-        row.update({lab: m.get(k) for k, lab in zip(keys, labels)})
+        row.update({lab: m.get(k, np.nan) if m.get(k) is not None else np.nan for k, lab in zip(keys, labels)})
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -391,8 +414,9 @@ def models_page():
     clf, reg = m["classification"], m["regression"]
     ui.hero("Model performance", "How well do the models work?",
             f"{len(clf['models']) - 1} classifiers and {len(reg['models']) - 1} regressors were trained on the same "
-            f"{m['train_rows']:,} listings, scored on {m['test_rows']:,} unseen ones, and tracked in MLflow. "
-            "The best of each is registered in the MLflow Model Registry under the alias 'champion'.",
+            f"{m['train_rows']:,} listings. The champion of each task was picked on {m['val_rows']:,} validation listings, "
+            f"then scored once on {m['test_rows']:,} test listings (all figures below are test results). Everything is "
+            "tracked in MLflow, and the champions are registered under the alias 'champion'.",
             pills=[f"Classifier: {clf['champion']} (v{clf['registry_version']})",
                    f"Regressor: {reg['champion']} (v{reg['registry_version']})", "Tracked with MLflow"])
     tab_c, tab_r, tab_m = st.tabs(["Classification: Good Investment", "Regression: price in 5 years", "MLflow"])
@@ -409,15 +433,19 @@ def models_page():
             ("Recall", ui.pct(100 * champ["recall"]), "Of the truly good listings, how many it finds"),
         ])
         st.write("")
-        table = _metric_table(clf["models"], clf["champion"], ["roc_auc", "f1", "accuracy", "precision", "recall", "train_seconds"],
-                              ["ROC AUC", "F1", "Accuracy", "Precision", "Recall", "Train (s)"])
-        st.dataframe(table.sort_values("ROC AUC", ascending=False), hide_index=True, width="stretch",
-                     column_config={c: st.column_config.NumberColumn(format="%.4f") for c in ["ROC AUC", "F1", "Accuracy", "Precision", "Recall"]}
-                     | {"Train (s)": st.column_config.NumberColumn(format="%.1f")})
+        table = _metric_table(clf["models"], clf["champion"],
+                              ["val_roc_auc", "roc_auc", "f1", "accuracy", "precision", "recall", "threshold", "train_seconds"],
+                              ["Val ROC AUC", "ROC AUC", "F1", "Accuracy", "Precision", "Recall", "Threshold", "Train (s)"])
+        st.dataframe(table.sort_values("Val ROC AUC", ascending=False), hide_index=True, width="stretch",
+                     column_config={c: st.column_config.NumberColumn(format="%.4f")
+                                    for c in ["Val ROC AUC", "ROC AUC", "F1", "Accuracy", "Precision", "Recall"]}
+                     | {"Threshold": st.column_config.NumberColumn(format="%.2f"),
+                        "Train (s)": st.column_config.NumberColumn(format="%.1f")})
         st.caption(f"Classes are {100 * (1 - clf['positive_rate']):.0f}:{100 * clf['positive_rate']:.0f}, so accuracy alone "
                    "misleads: the baseline that never predicts 'good' already scores "
-                   f"{100 * base['accuracy']:.0f}%. Models were compared on ROC AUC, with F1 as the tie-breaker. "
-                   "Class weights (or XGBoost's scale_pos_weight) handled the imbalance.")
+                   f"{100 * base['accuracy']:.0f}%. The champion is the model with the best validation ROC AUC (F1 breaks ties). "
+                   "Class weights (or XGBoost's scale_pos_weight) handle the imbalance, and each model's decision threshold "
+                   f"was tuned on validation to maximise F1 (champion: {clf['threshold']:.2f}). Test columns are unprefixed.")
         c1, c2, c3 = st.columns([1, 1, 1.2])
         with c1:
             cm = np.array(ev["classification"]["confusion_matrices"][clf["champion"]])
@@ -446,15 +474,16 @@ def models_page():
             ("MAPE", ui.pct(champ["mape_pct"], 2), "Average error as a % of the true future price"),
         ])
         st.write("")
-        table = _metric_table(reg["models"], reg["champion"], ["rmse", "mae", "mse", "r2", "mape_pct", "train_seconds"],
-                              ["RMSE", "MAE", "MSE", "R²", "MAPE %", "Train (s)"])
-        st.dataframe(table.sort_values("RMSE"), hide_index=True, width="stretch",
-                     column_config={c: st.column_config.NumberColumn(format="%.3f") for c in ["RMSE", "MAE", "MSE", "MAPE %"]}
+        table = _metric_table(reg["models"], reg["champion"], ["val_rmse", "rmse", "mae", "mse", "r2", "mape_pct", "train_seconds"],
+                              ["Val RMSE", "RMSE", "MAE", "MSE", "R²", "MAPE %", "Train (s)"])
+        st.dataframe(table.sort_values("Val RMSE"), hide_index=True, width="stretch",
+                     column_config={c: st.column_config.NumberColumn(format="%.3f") for c in ["Val RMSE", "RMSE", "MAE", "MSE", "MAPE %"]}
                      | {"R²": st.column_config.NumberColumn(format="%.5f"), "Train (s)": st.column_config.NumberColumn(format="%.1f")})
         st.caption("Future price = price × (1 + growth)^5 is multiplicative, so every model learns log(price): in log space the "
                    "formula becomes additive, which is why plain linear regression is as good as the boosted trees. "
                    "R² is high for all models because today's price explains most of the future price; RMSE and the "
-                   "fixed-rate baseline show the real gain.")
+                   "fixed-rate baseline show the real gain. The champion is the lowest validation RMSE; its 90% forecast "
+                   f"range covers {100 * reg['interval_90_test_coverage']:.1f}% of test listings.")
         c1, c2 = st.columns([1.3, 1])
         with c1:
             s = ev["regression"]["test_sample"]
@@ -485,9 +514,16 @@ fitted pipeline (preprocessing + model) with its input signature.
 **Hyperparameter tuning.** XGBoost was tuned for each task with a {config.TUNING_ITERATIONS}-candidate randomised search,
 {config.CV_FOLDS}-fold cross-validated on a {config.TUNING_SAMPLE_SIZE:,}-row sample, and logged as the "XGBoost (tuned)" run.
 
-To browse the runs locally:
+**Split.** {m['train_rows']:,} train / {m['val_rows']:,} validation / {m['test_rows']:,} test, stratified on Good_Investment.
+Validation picks each classifier's decision threshold, the champions and the forecast range; test is scored once.
+
+To browse the runs locally, from the project folder (the script also fixes MLflow's stored paths after a fresh clone):
 ```bash
-mlflow ui --backend-store-uri sqlite:///mlflow.db
+python mlflow_ui.py
+```
+To reload both champions from the registry and re-check every reported test metric:
+```bash
+python evaluate.py
 ```
 The app loads the champion models exported from the registry (`models/*.joblib`), so it runs without an MLflow server.
 """)
@@ -513,6 +549,8 @@ def about():
     ui.hero("About", "Methodology and assumptions",
             "How the dataset was cleaned, how the two targets were defined, and how the models were built.")
     adj = config.GROWTH_ADJUSTMENTS
+    m = data.metrics()
+    clf, reg = m["classification"], m["regression"]
     st.markdown(f"""
 ### Problem
 Help investors decide whether a property is worth buying (**classification: Good Investment**) and what it will be worth
@@ -546,7 +584,7 @@ a listing cannot capture (rates, policy, local news). Bounded to {config.GROWTH_
 | Security / parking | {adj['security']['Yes']:+} each | Gated, parked homes resell at a premium |
 | Amenities | {config.GROWTH_PER_AMENITY:+} per amenity | Clubhouse, gym, pool, garden, playground |
 | Schools + hospitals | {config.GROWTH_PER_SOCIAL_FACILITY:+} per facility | Social infrastructure nearby |
-| Age | {config.GROWTH_PER_YEAR_OF_AGE:+} per year beyond {config.GROWTH_AGE_PIVOT_YEARS} years | Older buildings depreciate |
+| Age | {config.GROWTH_PER_YEAR_OF_AGE:+} per year of age above {config.GROWTH_AGE_PIVOT_YEARS} (newer homes gain the same per year below it) | Older buildings depreciate |
 
 The base was chosen so the market-wide average is ≈8%, the rate in the brief's own example.
 
@@ -559,12 +597,16 @@ That makes a good investment one that grows faster than the market **and** is no
 listings qualify.
 
 ### Models
-- One stratified 80/20 split, shared by both tasks. Numeric features scaled, categories one-hot encoded, all inside
-  a scikit-learn pipeline so the app applies exactly the same preprocessing.
+- One stratified split, shared by both tasks: {m['train_rows']:,} train / {m['val_rows']:,} validation / {m['test_rows']:,} test.
+  Models are fitted on train; validation picks the champions, each classifier's decision threshold (maximising F1) and
+  the 90% forecast range; test is scored once and is what every page reports.
+- Numeric features scaled, categories one-hot encoded, all inside a scikit-learn pipeline so the app applies exactly
+  the same preprocessing. Class imbalance (73:27) handled with class weights / `scale_pos_weight`.
 - Classification: baseline, Logistic Regression, Decision Tree, Random Forest, Extra Trees, Hist Gradient Boosting,
   XGBoost, tuned XGBoost. Regression: fixed-8% baseline, Linear, Ridge, Decision Tree, Random Forest, Hist Gradient
   Boosting, XGBoost, tuned XGBoost (all on a log-transformed target).
-- Everything logged to MLflow; the best model of each task is registered with the alias `champion`.
+- Everything logged to MLflow; the champions ({clf['champion']} and {reg['champion']}) are registered with the alias
+  `champion`. `python evaluate.py` reloads them from the registry and re-checks every reported test metric.
 
 ### Honest limits
 The listings are synthetic (every column is independent of every other), and the targets are rule-based. The models

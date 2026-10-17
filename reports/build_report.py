@@ -112,6 +112,7 @@ def build_html(live_url: str | None) -> str:
     clf, reg = m["classification"], m["regression"]
     cc, rc = clf["models"][clf["champion"]], reg["models"][reg["champion"]]
     rb = reg["models"]["Baseline (fixed 8% rate)"]
+    cm = json.loads(config.EVALUATION_PATH.read_text())["classification"]["confusion_matrices"][clf["champion"]]
     adj = config.GROWTH_ADJUSTMENTS
 
     def qa(ids):
@@ -137,8 +138,8 @@ def build_html(live_url: str | None) -> str:
   </table>
   <div class="kpis">
     <div class="kpi"><b>250,000</b><span>listings, 42 cities, 20 states</span></div>
-    <div class="kpi"><b>{cc['roc_auc']:.3f}</b><span>classifier ROC AUC ({clf['champion']})</span></div>
-    <div class="kpi"><b>{rc['rmse']:.1f} L</b><span>regressor RMSE, R² {rc['r2']:.4f} ({reg['champion']})</span></div>
+    <div class="kpi"><b>{cc['roc_auc']:.3f}</b><span>classifier ROC AUC · {clf['champion']}</span></div>
+    <div class="kpi"><b>{rc['rmse']:.1f} L</b><span>regressor RMSE (R² {rc['r2']:.4f}) · {reg['champion']}</span></div>
     <div class="kpi"><b>{len(clf['models']) - 1 + len(reg['models']) - 1}</b><span>models trained and logged in MLflow</span></div>
   </div>
 </div>
@@ -187,13 +188,13 @@ The market-wide average is ≈ 8%, the rate in the brief's example.</div>
 <tr><td>Tier 2 city</td><td>{adj['city_tier'][2]:+}</td><td>Developing markets grow faster from a lower base</td></tr>
 <tr><td>Security, parking</td><td>{adj['security']['Yes']:+} each</td><td>Resale premium</td></tr>
 <tr><td>Amenities; schools + hospitals</td><td>{config.GROWTH_PER_AMENITY:+} each; {config.GROWTH_PER_SOCIAL_FACILITY:+} each</td><td>Facilities and social infrastructure</td></tr>
-<tr><td>Age</td><td>{config.GROWTH_PER_YEAR_OF_AGE:+} per year beyond {config.GROWTH_AGE_PIVOT_YEARS}</td><td>Depreciation of older buildings</td></tr>
+<tr><td>Age</td><td>{config.GROWTH_PER_YEAR_OF_AGE:+} per year of age above {config.GROWTH_AGE_PIVOT_YEARS} (newer homes gain the same per year below it)</td><td>Depreciation of older buildings</td></tr>
 </tbody></table>
 <div class="box"><b>Good_Investment</b> = 1 when annual appreciation ≥ <b>{config.GOOD_INVESTMENT_MIN_GROWTH:.0f}%</b> <b>and</b>
 price per sq ft ≤ the <b>city median</b>. This combines the brief's three suggested rules (appreciation above a threshold,
 cheaper than the median, multi-factor). Result: {rep['good_investment_rate_pct']}% of listings are Good Investments.</div>
 
-<h2 class="page">4. Exploratory data analysis</h2>
+<h2>4. Exploratory data analysis</h2>
 <h3>Price and size (Q1–Q5)</h3>
 {qa(['Q1', 'Q2', 'Q3', 'Q4', 'Q5'])}
 {fig('q05_outliers', 'Q5. Outliers: only price per sq ft has them (IQR rule)')}
@@ -224,30 +225,38 @@ type changes price per sq ft by ~1%: significant but not meaningful).</p>
 
 <h2 class="page">5. Model development</h2>
 <ul>
-<li>One <b>stratified 80/20 split</b> ({m['train_rows']:,} train / {m['test_rows']:,} test), shared by both tasks.</li>
+<li>One <b>stratified 70/15/15 split</b>, shared by both tasks: {m['train_rows']:,} train / {m['val_rows']:,} validation /
+{m['test_rows']:,} test. Models are fitted on train; <b>validation</b> picks the champions, each classifier's decision threshold
+and the forecast range; the <b>test</b> set is scored once and is the only set reported.</li>
 <li>A scikit-learn <b>Pipeline</b>: median/mode imputation → StandardScaler (numeric) + OneHotEncoder (categorical) → model,
 so the app applies exactly the same preprocessing.</li>
 <li><b>Class imbalance</b> ({100 * (1 - clf['positive_rate']):.0f}:{100 * clf['positive_rate']:.0f}): stratified split, <code>class_weight="balanced"</code>,
-XGBoost <code>scale_pos_weight</code> = {clf['pos_weight']:.2f}; models compared on ROC AUC with F1 as tie-break (accuracy is misleading:
-the majority-class baseline already scores {100 * clf['models']['Baseline (majority class)']['accuracy']:.0f}%).</li>
+XGBoost <code>scale_pos_weight</code> = {clf['pos_weight']:.2f}, and each classifier's probability cut-off tuned on validation to
+maximise F1. Models are compared on validation ROC AUC with F1 as tie-break (accuracy is misleading: the majority-class
+baseline already scores {100 * clf['models']['Baseline (majority class)']['accuracy']:.0f}%).</li>
 <li><b>Regression in log space</b>: price × (1 + r)<sup>5</sup> is multiplicative; log turns it additive, so every model fits it easily.</li>
 <li><b>Hyperparameter tuning</b>: XGBoost, randomised search ({config.TUNING_ITERATIONS} candidates, {config.CV_FOLDS}-fold CV on a
 {config.TUNING_SAMPLE_SIZE:,}-row sample), logged as its own run.</li>
 </ul>
 <h3>Classification: Good Investment</h3>
-{metrics_table(clf['models'], clf['champion'], [('roc_auc', 'ROC AUC', '.4f'), ('f1', 'F1', '.4f'), ('accuracy', 'Accuracy', '.4f'),
-                                               ('precision', 'Precision', '.4f'), ('recall', 'Recall', '.4f')])}
-<p><b>Champion: {clf['champion']}</b> (ROC AUC {cc['roc_auc']:.3f}, F1 {cc['f1']:.3f}, recall {100 * cc['recall']:.1f}%). Boosted trees
-lead because the label is an AND of two thresholds, which trees represent naturally. High recall means it misses few
-genuinely good properties, at the cost of some false alarms; for screening listings that is the right trade-off.</p>
+{metrics_table(clf['models'], clf['champion'], [('val_roc_auc', 'Val AUC', '.4f'), ('roc_auc', 'Test AUC', '.4f'), ('f1', 'F1', '.4f'),
+                                               ('accuracy', 'Accuracy', '.4f'), ('precision', 'Precision', '.4f'),
+                                               ('recall', 'Recall', '.4f'), ('threshold', 'Threshold', '.2f')])}
+<p><b>Champion: {clf['champion']}</b>: best validation ROC AUC; on the test set ROC AUC {cc['roc_auc']:.3f}, F1 {cc['f1']:.3f},
+accuracy {100 * cc['accuracy']:.1f}%, precision {100 * cc['precision']:.1f}%, recall {100 * cc['recall']:.1f}% at a decision threshold of
+{clf['threshold']:.2f}. Confusion matrix (test): {cm[0][0]:,} true negatives, {cm[0][1]:,} false positives, {cm[1][0]:,} false negatives,
+{cm[1][1]:,} true positives. Boosted trees lead because the label is an AND of two thresholds, which trees represent
+naturally; the remaining errors sit near the 8% growth line, where the random market shock decides the label.</p>
 <h3>Regression: price in 5 years</h3>
-{metrics_table(reg['models'], reg['champion'], [('rmse', 'RMSE (L)', '.3f'), ('mae', 'MAE (L)', '.3f'), ('mse', 'MSE', '.2f'),
+{metrics_table(reg['models'], reg['champion'], [('val_rmse', 'Val RMSE', '.3f'), ('rmse', 'Test RMSE (L)', '.3f'),
+                                               ('mae', 'MAE (L)', '.3f'), ('mse', 'MSE', '.2f'),
                                                ('r2', 'R²', '.5f'), ('mape_pct', 'MAPE %', '.2f')])}
 <p><b>Champion: {reg['champion']}</b>, RMSE {rc['rmse']:.2f} L ({100 * (1 - rc['rmse'] / rb['rmse']):.0f}% lower than the brief's fixed-8% formula)
 and MAPE {rc['mape_pct']:.2f}%. In log space future price is a linear function of the features, so the simplest
 model wins and is also the fastest and most explainable. R² is high for every model because today's price explains
 most of the future price; RMSE against the baseline shows the real gain. The remaining error is the random market shock,
-which no model can predict.</p>
+which no model can predict. The app's 90% forecast range is calibrated on validation residuals and contains the true
+value for {100 * reg['interval_90_test_coverage']:.1f}% of test listings.</p>
 
 <h2>6. MLflow tracking and registry</h2>
 <ul>
@@ -256,9 +265,12 @@ which no model can predict.</p>
 and JSON, and the fitted pipeline with its input signature.</li>
 <li>Registry: <code>{config.REGISTERED_CLASSIFIER}</code> v{clf['registry_version']} and <code>{config.REGISTERED_REGRESSOR}</code>
 v{reg['registry_version']}, each with the alias <code>@{config.CHAMPION_ALIAS}</code>. The app loads these champions (exported to <code>models/</code>).</li>
+<li><code>python evaluate.py</code> reloads both champions from the registry (<code>models:/…@champion</code>), re-scores the test set, prints the
+classification report and confusion matrix, and asserts that the numbers and the app's model files match exactly.</li>
+<li><code>python mlflow_ui.py</code> opens the MLflow UI; it first re-points MLflow's stored artifact paths so a fresh clone works anywhere.</li>
 </ul>
 
-<h2 class="page">7. Streamlit application</h2>
+<h2>7. Streamlit application</h2>
 <p>Six pages: <b>Investment advisor</b> (form → verdict with confidence, 5-year forecast with a 90% range, the two rule checks,
 SHAP explanation, similar listings), <b>Property explorer</b> (all 250,000 listings scored; filter by area, price, BHK,
 availability; search; sort; CSV download), <b>Location insights</b> (map heatmap, state × type heatmap, city ranking, price
@@ -270,7 +282,7 @@ trend), <b>Market analysis</b>, <b>Model performance</b> and <b>About</b>.</p>
 {img(shots / '07_models_classification.png', 'Model performance: classification comparison, confusion matrix, ROC, importance')}
 {img(shots / '08_models_regression.png', 'Model performance: regression comparison and actual vs predicted')}
 
-<h2 class="page">8. Insights and business recommendations</h2>
+<h2>8. Insights and business recommendations</h2>
 <ol>
 <li><b>Connectivity first.</b> High-transport properties are Good Investments 43% of the time vs 11% for low transport. Platforms
 should surface transport access prominently, and investors should weight it above furnishing or facing.</li>
@@ -294,9 +306,10 @@ directly. Useful additions: crime index, RERA status, distance to metro and busi
 <h2>9. Deliverables</h2>
 <table><tbody>
 <tr><td>Cleaned dataset</td><td><code>data/processed/housing_clean.csv</code></td></tr>
-<tr><td>Scripts</td><td><code>pipeline.py</code>, <code>train.py</code>, <code>src/</code> (cleaning, features, targets, EDA, modelling, tracking)</td></tr>
+<tr><td>Scripts</td><td><code>pipeline.py</code> (data), <code>train.py</code> (training + MLflow), <code>evaluate.py</code> (evaluation),
+<code>src/</code> (cleaning, features, targets, EDA, modelling, tracking)</td></tr>
 <tr><td>EDA notebook</td><td><code>notebooks/eda.ipynb</code> (all 20 questions + statistical tests)</td></tr>
-<tr><td>MLflow logs + registry</td><td><code>mlflow.db</code>, <code>mlruns/</code></td></tr>
+<tr><td>MLflow logs + registry</td><td><code>mlflow.db</code>, <code>mlruns/</code>, viewed with <code>python mlflow_ui.py</code></td></tr>
 <tr><td>Streamlit app</td><td><code>app/streamlit_app.py</code>{f' · <a href="{live_url}">{live_url}</a>' if live_url else ''}</td></tr>
 <tr><td>Documentation</td><td><code>README.md</code>, this report, <code>reports/screenshots/</code></td></tr>
 </tbody></table>

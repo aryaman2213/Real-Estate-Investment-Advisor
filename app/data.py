@@ -20,24 +20,55 @@ APP_COLUMNS = [
 ]
 
 
-@st.cache_resource(show_spinner=False)
-def models():
+ARTIFACTS = [config.APP_DATA_PATH, config.CLASSIFIER_PATH, config.REGRESSOR_PATH, config.METRICS_PATH,
+             config.EVALUATION_PATH, config.MARKET_REFERENCE_PATH]
+
+
+def _stamp() -> tuple:
+    """Changes whenever a data or model file changes, so the caches below refresh after a redeploy
+    (Streamlit Cloud pulls new files without restarting the server)."""
+    return tuple(p.stat().st_mtime_ns for p in ARTIFACTS)
+
+
+@st.cache_resource(show_spinner=False, max_entries=1)
+def _models(stamp):
     return joblib.load(config.CLASSIFIER_PATH), joblib.load(config.REGRESSOR_PATH)
 
 
-@st.cache_resource(show_spinner=False)
-def market_reference():
+def models():
+    return _models(_stamp())
+
+
+@st.cache_data(show_spinner=False)
+def _market_reference(stamp):
     return load_market_reference()
 
 
+def market_reference():
+    return _market_reference(_stamp())
+
+
 @st.cache_data(show_spinner=False)
-def metrics():
+def _metrics(stamp):
     return json.loads(config.METRICS_PATH.read_text())
 
 
+def metrics():
+    return _metrics(_stamp())
+
+
+def decision_threshold() -> float:
+    """Probability cut-off for 'Good Investment', tuned on the validation split to maximise F1."""
+    return float(metrics()["classification"]["threshold"])
+
+
 @st.cache_data(show_spinner=False)
-def evaluation():
+def _evaluation(stamp):
     return json.loads(config.EVALUATION_PATH.read_text())
+
+
+def evaluation():
+    return _evaluation(_stamp())
 
 
 def model_input(df: pd.DataFrame) -> pd.DataFrame:
@@ -47,18 +78,23 @@ def model_input(df: pd.DataFrame) -> pd.DataFrame:
     return X
 
 
-@st.cache_data(show_spinner="Loading 250,000 listings and scoring them with the models...")
-def listings() -> pd.DataFrame:
-    """The cleaned dataset, plus each listing's model scores (computed once, then cached)."""
+@st.cache_data(show_spinner="Loading 250,000 listings and scoring them with the models...", max_entries=1)
+def _listings(stamp) -> pd.DataFrame:
     df = pd.read_parquet(config.APP_DATA_PATH)
     clf, reg = models()
     X = model_input(df)
     out = df[APP_COLUMNS].copy()
     out["Model_Probability"] = clf.predict_proba(X)[:, 1]
+    out["Model_Verdict"] = (out["Model_Probability"] >= decision_threshold()).astype(int)
     out["Predicted_Price_5Y"] = reg.predict(X)
     out["Predicted_Gain_Pct"] = (out["Predicted_Price_5Y"] / out["Price_in_Lakhs"] - 1) * 100
     out["Tier_Label"] = np.where(out["City_Tier"] == 1, "Tier 1 metro", "Tier 2 city")
     return out
+
+
+def listings() -> pd.DataFrame:
+    """The cleaned dataset, plus each listing's model scores (computed once per data/model version, then cached)."""
+    return _listings(_stamp())
 
 
 @dataclass(frozen=True)
@@ -111,6 +147,7 @@ def build_property(form: dict) -> pd.DataFrame:
 @dataclass
 class Prediction:
     probability: float
+    threshold: float
     is_good: bool
     future_price: float
     future_low: float
@@ -126,8 +163,9 @@ def predict(prop: pd.DataFrame) -> Prediction:
     future = float(reg.predict(X)[0])
     q = evaluation()["regression"]["log_residual_quantiles"]
     price = float(prop["Price_in_Lakhs"].iloc[0])
+    threshold = decision_threshold()
     return Prediction(
-        probability=probability, is_good=probability >= 0.5, future_price=future,
+        probability=probability, threshold=threshold, is_good=probability >= threshold, future_price=future,
         future_low=future * np.exp(q["p05"]), future_high=future * np.exp(q["p95"]),
         implied_growth_pct=((future / price) ** (1 / config.FORECAST_YEARS) - 1) * 100,
         contributions=contributions(clf, X),

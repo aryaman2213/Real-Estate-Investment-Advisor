@@ -122,7 +122,8 @@ NUMERIC_FEATURES = [
 CLASSIFICATION_TARGET = "Good_Investment"
 REGRESSION_TARGET = "Future_Price_5Y"
 
-TEST_SIZE = 0.2
+VALID_SIZE = 0.15  # model selection, decision threshold, forecast-range calibration
+TEST_SIZE = 0.15   # scored once, reported everywhere
 TUNING_SAMPLE_SIZE = 40_000
 TUNING_ITERATIONS = 12
 CV_FOLDS = 3

@@ -56,7 +56,9 @@ h1, h2, h3 { letter-spacing: -0.02em; color: %(ink)s; }
 .verdict .title { font-size: 1.55rem; font-weight: 800; color: %(ink)s; margin: 0.1rem 0; }
 .verdict .sub { color: #334155; font-size: 0.92rem; }
 .bar { height: 8px; background: #e2e8f0; border-radius: 99px; overflow: hidden; margin-top: 0.55rem; max-width: 26rem; }
+.bar { position: relative; overflow: visible; }
 .bar > div { height: 100%%; border-radius: 99px; }
+.bar .mark { position: absolute; top: -4px; width: 2px; height: 16px; background: %(ink)s; border-radius: 1px; }
 .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.6rem; margin-top: 0.2rem; }
 .check { background: #ffffff; border: 1px solid #e6e8ef; border-radius: 12px; padding: 0.7rem 0.9rem; font-size: 0.9rem; color: #334155; }
 .check b { color: %(ink)s; }
@@ -79,6 +81,10 @@ section[data-testid="stSidebar"] h2 { font-size: 1.05rem; }
 .sidebar-note { color: %(muted)s; font-size: 0.78rem; line-height: 1.45; }
 </style>
 """ % {"font": FONT, "ink": INK, "muted": MUTED, "accent": ACCENT}
+
+
+# Hover tooltips and drag-to-zoom stay on; the floating toolbar is hidden because it covers legends on phones.
+PLOTLY_CONFIG = {"displaylogo": False, "displayModeBar": False}
 
 
 def install_theme():
@@ -134,7 +140,7 @@ def chart_card(fig, title, subtitle=None, height=360, tickangle=0):
                           margin=dict(l=4, r=8, t=34, b=4), title=None, legend_title_text="",
                           uniformtext_minsize=10, uniformtext_mode="hide")
         fig.update_xaxes(tickangle=tickangle, automargin=True)
-        st.plotly_chart(fig, width="stretch", theme=None, config={"displaylogo": False}, key="chart-" + slug(title))
+        st.plotly_chart(fig, width="stretch", theme=None, config=PLOTLY_CONFIG, key="chart-" + slug(title))
 
 
 def insight_cards(items):
