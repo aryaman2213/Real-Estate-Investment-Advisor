@@ -1,0 +1,11 @@
+# App-only dependencies (Streamlit Community Cloud reads this file).
+# Pinned to the versions the models were trained with: a pickled scikit-learn/XGBoost model must be
+# loaded with the same library versions.
+streamlit==1.66.0
+pandas==3.0.6
+numpy==2.5.4
+scikit-learn==1.9.1
+xgboost==3.4.1
+plotly==7.1.0
+joblib==1.6.0
+pyarrow==25.0.1

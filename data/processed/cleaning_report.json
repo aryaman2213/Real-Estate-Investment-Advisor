@@ -1,0 +1,70 @@
+{
+  "raw_shape": [
+    250000,
+    23
+  ],
+  "category_levels": {
+    "State": 20,
+    "City": 42,
+    "Locality": 500,
+    "Property_Type": 3,
+    "Furnished_Status": 3,
+    "Public_Transport_Accessibility": 3,
+    "Parking_Space": 2,
+    "Security": 2,
+    "Amenities": 31,
+    "Facing": 4,
+    "Owner_Type": 3,
+    "Availability_Status": 2
+  },
+  "values_made_missing_by_type_fix": 0,
+  "missing_before": {},
+  "missing_after": 0,
+  "duplicates_removed": {
+    "exact": 0,
+    "same_listing_different_id": 0
+  },
+  "floor_above_total_floors": {
+    "rows": 116304,
+    "pct": 46.52,
+    "action": "swap"
+  },
+  "age_mismatches": 0,
+  "impossible_rows_dropped": 0,
+  "outliers_iqr": {
+    "Price_in_Lakhs": {
+      "lower_fence": -233.94,
+      "upper_fence": 743.38,
+      "outliers": 0
+    },
+    "Size_in_SqFt": {
+      "lower_fence": -1753.5,
+      "upper_fence": 7250.5,
+      "outliers": 0
+    },
+    "Price_per_SqFt": {
+      "lower_fence": -11973.99,
+      "upper_fence": 32764.22,
+      "outliers": 19723
+    }
+  },
+  "clean_shape": [
+    250000,
+    24
+  ],
+  "engineered_shape": [
+    250000,
+    47
+  ],
+  "good_investment_rate_pct": 27.06,
+  "growth_rate_summary": {
+    "count": 250000.0,
+    "mean": 8.138,
+    "std": 1.363,
+    "min": 2.018,
+    "25%": 7.192,
+    "50%": 8.144,
+    "75%": 9.088,
+    "max": 14.069
+  }
+}
