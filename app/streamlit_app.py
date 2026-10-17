@@ -37,9 +37,13 @@ ui.install_theme()
 FILTER_KEYS = ["f_state", "f_city", "f_type", "f_bhk", "f_price", "f_size", "f_avail", "f_good"]
 # Streamlit forgets a widget's value on runs where it is not drawn (the advisor page hides the filters).
 # Re-assigning keeps the choice when the user comes back.
+# Defaults live in session state (not in the widget call), so the two never conflict.
+FILTER_DEFAULTS = {"f_price": (10, 500), "f_size": (500, 5000)}
 for key in FILTER_KEYS:
     if key in st.session_state:
         st.session_state[key] = st.session_state[key]
+    elif key in FILTER_DEFAULTS:
+        st.session_state[key] = FILTER_DEFAULTS[key]
 
 
 def sidebar_filters(df) -> data.Filters:
@@ -52,8 +56,8 @@ def sidebar_filters(df) -> data.Filters:
         cities = st.multiselect("City", sorted(city_pool.unique()), key="f_city")
         types = st.multiselect("Property type", sorted(df["Property_Type"].unique()), key="f_type")
         bhk = st.multiselect("BHK", [1, 2, 3, 4, 5], key="f_bhk")
-        price = st.slider("Price (lakhs)", 10, 500, (10, 500), step=10, key="f_price")
-        size = st.slider("Size (sq ft)", 500, 5000, (500, 5000), step=100, key="f_size")
+        price = st.slider("Price (lakhs)", 10, 500, step=10, key="f_price")
+        size = st.slider("Size (sq ft)", 500, 5000, step=100, key="f_size")
         avail = st.multiselect("Availability", ["Ready to Move", "Under Construction"], key="f_avail")
         good = st.toggle("Good Investments only", key="f_good")
         st.divider()
