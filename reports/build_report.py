@@ -28,7 +28,8 @@ import config  # noqa: E402
 REPORTS = ROOT / "reports"
 PDF_PATH = REPORTS / "Real_Estate_Investment_Advisor_Report.pdf"
 AUTHOR = "Aryaman Bhatnagar"
-GITHUB_URL = "https://github.com/aryaman2213/real-estate-investment-advisor"
+GITHUB_URL = "https://github.com/aryaman2213/Real-Estate-Investment-Advisor"
+LIVE_URL = "https://aryaman-real-estate-advisor.streamlit.app"
 
 
 def md(text: str) -> str:
@@ -319,7 +320,7 @@ directly. Useful additions: crime index, RERA status, distance to metro and busi
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--live-url", default=None, help="Streamlit Cloud URL, once deployed")
+    parser.add_argument("--live-url", default=LIVE_URL, help="Streamlit Cloud URL of the deployed app")
     args = parser.parse_args()
     page_html = build_html(args.live_url)
     from playwright.sync_api import sync_playwright

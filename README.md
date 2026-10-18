@@ -9,6 +9,7 @@ property is a **Good Investment** (classification) and what it will be worth **i
 | Good Investment (classification) | Tuned XGBoost | ROC AUC **0.970**, F1 **0.838**, accuracy **90.7%**, precision 79.5%, recall 88.6% |
 | Price in 5 years (regression) | Linear Regression on log price | RMSE **₹14.9 L**, MAE ₹10.4 L, R² **0.995**, MAPE 2.8%: **45% lower RMSE** than the fixed-8% formula |
 
+- **Live app:** https://aryaman-real-estate-advisor.streamlit.app
 - **App:** six pages: Investment advisor, Property explorer, Location insights, Market analysis, Model performance, About
 - **Report:** [`reports/Real_Estate_Investment_Advisor_Report.pdf`](reports/Real_Estate_Investment_Advisor_Report.pdf)
 - **EDA:** [`notebooks/eda.ipynb`](notebooks/eda.ipynb), answering all 20 EDA questions plus the statistical tests
@@ -152,5 +153,5 @@ Python 3.13. The app installs from `app/requirements.txt`, which pins the librar
 ```bash
 streamlit run app/streamlit_app.py --server.port 8517          # in another terminal
 python reports/capture_screenshots.py --url http://localhost:8517
-python reports/build_report.py --live-url https://<your-app>.streamlit.app
+python reports/build_report.py          # live link defaults to the deployed app
 ```
