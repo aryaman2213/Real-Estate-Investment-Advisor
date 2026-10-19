@@ -82,6 +82,16 @@ def main():
         settle(page, 2500)
         full_page(page, "10_about")
         browser.close()
+    make_readme_preview()
+
+
+def make_readme_preview():
+    """The README's hero image: the result section of the advisor screenshot."""
+    from PIL import Image
+
+    shot = Image.open(OUT / "01_advisor_good_investment.png")
+    shot.crop((80, 880, 1360, shot.height - 60)).save(OUT / "readme_preview.png", optimize=True)
+    print("saved readme_preview")
 
 
 if __name__ == "__main__":

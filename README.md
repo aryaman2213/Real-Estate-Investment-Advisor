@@ -1,5 +1,11 @@
 # Real Estate Investment Advisor
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://aryaman-real-estate-advisor.streamlit.app)
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-1.9-F7931E?logo=scikitlearn&logoColor=white)
+![XGBoost](https://img.shields.io/badge/XGBoost-3.4-EB5B2D)
+![MLflow](https://img.shields.io/badge/MLflow-3.17-0194E2?logo=mlflow&logoColor=white)
+
 **Predicting property profitability and future value.** A machine-learning app that tells an investor whether a
 property is a **Good Investment** (classification) and what it will be worth **in 5 years** (regression), built on
 250,000 Indian property listings, tracked with **MLflow** and served through **Streamlit**.
@@ -13,6 +19,8 @@ property is a **Good Investment** (classification) and what it will be worth **i
 - **App:** six pages: Investment advisor, Property explorer, Location insights, Market analysis, Model performance, About
 - **Report:** [`reports/Real_Estate_Investment_Advisor_Report.pdf`](reports/Real_Estate_Investment_Advisor_Report.pdf)
 - **EDA:** [`notebooks/eda.ipynb`](notebooks/eda.ipynb), answering all 20 EDA questions plus the statistical tests
+
+![Investment advisor: verdict, 5-year forecast, rule checks and SHAP explanation](reports/screenshots/readme_preview.png)
 
 ---
 
@@ -148,6 +156,15 @@ directly. Useful additions would be a crime index, RERA status, and distance to 
 
 **Deploy on Streamlit Community Cloud:** New app → this repo, branch `main`, main file `app/streamlit_app.py`,
 Python 3.13. The app installs from `app/requirements.txt`, which pins the library versions the models were trained with.
+
+### Screenshots
+| | |
+|---|---|
+| ![Advisor: good investment](reports/screenshots/01_advisor_good_investment.png) | ![Advisor: not a good investment](reports/screenshots/02_advisor_not_good.png) |
+| ![Property explorer](reports/screenshots/03_property_explorer.png) | ![Location insights](reports/screenshots/05_location_insights.png) |
+| ![Market analysis](reports/screenshots/06_market_analysis.png) | ![Model performance](reports/screenshots/07_models_classification.png) |
+
+All ten screenshots are in [`reports/screenshots/`](reports/screenshots/).
 
 ## Rebuilding the reports
 ```bash
